@@ -149,7 +149,12 @@ export default function getParser() {
                 }
             }
 
-            if (id.includes('sub-store/backend/src/core/proxy-utils/parsers/peggy/')) {
+            // Sub-Store 2.44.x 把 trojan-uri.js 改写成手写解析器，不再含 grammars；
+            // 只有仍含 grammars 的 peggy 文件才需要预编译，手写文件原样放过。
+            if (
+                id.includes('sub-store/backend/src/core/proxy-utils/parsers/peggy/') &&
+                contents.includes('const grammars = String.raw')
+            ) {
                 contents = precompilePeggyParser(contents, id, this);
             }
 
