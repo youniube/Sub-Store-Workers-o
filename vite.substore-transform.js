@@ -125,6 +125,18 @@ export default function getParser() {
             contents = contents.replace(/const\s+isNode\s*=\s*eval\s*\(\s*`typeof\s+process\s*!==\s*"undefined"`\s*\)/g, 'const isNode = false');
             contents = contents.replace(/const\s+isSurge\s*=\s*typeof\s+\$httpClient\s*!==\s*['"]undefined['"]\s*&&\s*!isLoon(?:\s*&&\s*!isEgern)?\s*;/g, 'const isSurge = true;');
 
+            // Sub-Store 2.44.x 新增 backend/src/runtime/*.js：裸 require('fs'/'path'/...)
+            // （非 eval 包裹），通用 eval 替换够不到，残留检查会报错；Workers 下
+            // isNode 恒为 false，这些 getter 不会被调用，按 eval 替换的同款 shim 占位。
+            // net/tls/dgram 不在危险名单里，不动。
+            if (id.includes('sub-store/backend/src/runtime/')) {
+                contents = contents
+                    .replace(/require\s*\(\s*['"]fs['"]\s*\)/g, 'globalThis.__fs_shim__')
+                    .replace(/require\s*\(\s*['"]path['"]\s*\)/g, 'globalThis.__path_shim__')
+                    .replace(/require\s*\(\s*['"]child_process['"]\s*\)/g, '({ execFile: () => {} })')
+                    .replace(/require\s*\(\s*['"]stream\/promises['"]\s*\)/g, 'globalThis.__stream_promises_shim__');
+            }
+
             assertNoDangerousRequireResidue(contents, id, this);
 
             if (id.includes('utils/cors.js')) {
