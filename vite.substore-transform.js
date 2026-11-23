@@ -19,6 +19,10 @@ export function subStoreTransformPlugin() {
     let openApiDebugFileSeen = false;
     let rsPatchApplied = 0;
     let rsFileSeen = false;
+    let miscsPatchApplied = 0;
+    let miscsFileSeen = false;
+    let tokenPatchApplied = 0;
+    let tokenFileSeen = false;
     let subStoreFileSeen = false;
 
     const requiredTargetFiles = [
@@ -28,6 +32,8 @@ export function subStoreTransformPlugin() {
         ['processors/index.js', () => processorsFileSeen, () => processorsPatchApplied],
         ['core/app.js', () => openApiDebugFileSeen, () => openApiDebugPatchApplied],
         ['utils/rs.js', () => rsFileSeen, () => rsPatchApplied],
+        ['restful/miscs.js', () => miscsFileSeen, () => miscsPatchApplied],
+        ['restful/token.js', () => tokenFileSeen, () => tokenPatchApplied],
     ];
 
     const dangerousRequireNames = [
@@ -497,6 +503,67 @@ export default {
                 if (!contents.includes("from 'node:crypto'")) {
                     this.error('[sub-store-transform] utils/rs.js 补丁自检失败：未使用 node:crypto');
                 }
+            }
+
+            // Workers 部署分享功能（1/2）：后端 getEnv 只在 Loon 付费 SubsCheck Pro
+            // 或 env 请求带 ?share 时才报 feature.share，前端据此显示分享页与
+            // 卡片分享按钮；Workers 下两者都不满足，入口永不出现。直接开启。
+            if (id.includes('sub-store/backend/src/restful/miscs.js')) {
+                miscsFileSeen = true;
+                const miscsNeedle = [
+                    '    if (ENV().isSubsCheckPro || req.query.share) {',
+                    '        env.feature.share = true;',
+                    '    }',
+                ].join('\n');
+                if (!contents.includes(miscsNeedle)) {
+                    this.error('[sub-store-transform] restful/miscs.js 分享补丁未应用：未命中 getEnv 的 feature.share 条件');
+                }
+                contents = contents.replace(
+                    miscsNeedle,
+                    [
+                        '    // __SUB_STORE_WORKERS_PATCH__SHARE_FEATURE__',
+                        '    // Workers 下 isSubsCheckPro 恒为 false，前端取 env 不带 ?share，直接开启分享。',
+                        '    env.feature.share = true;',
+                    ].join('\n'),
+                );
+                if (contents.includes(miscsNeedle) || !contents.includes('__SUB_STORE_WORKERS_PATCH__SHARE_FEATURE__')) {
+                    this.error('[sub-store-transform] restful/miscs.js 分享补丁自检失败');
+                }
+                miscsPatchApplied += 1;
+            }
+
+            // Workers 部署分享功能（2/2）：创建分享调 POST /api/token，后端 signToken
+            // 要求 isNode 或 isSubsCheckPro；Workers 下 isNode 被本文件强制为
+            // false，isSubsCheckPro 也为 false，接口直接报 INVALID_ENV。
+            // 放开这道门禁；token 生成走非 Node 分支（nanoid 浏览器版），
+            // 存储走 Durable Objects，不依赖 Node 专属能力。
+            if (id.includes('sub-store/backend/src/restful/token.js')) {
+                tokenFileSeen = true;
+                const tokenNeedle = [
+                    '    if (!ENV().isNode && !ENV().isSubsCheckPro) {',
+                    '        return failed(',
+                    '            res,',
+                    '            new RequestInvalidError(',
+                    "                'INVALID_ENV',",
+                    '                `This endpoint is only available in Node.js environment`,',
+                    '            ),',
+                    '        );',
+                    '    }',
+                ].join('\n');
+                if (!contents.includes(tokenNeedle)) {
+                    this.error('[sub-store-transform] restful/token.js 分享补丁未应用：未命中 signToken 的环境门禁');
+                }
+                contents = contents.replace(
+                    tokenNeedle,
+                    [
+                        '    // __SUB_STORE_WORKERS_PATCH__SHARE_SIGN_TOKEN__',
+                        '    // Workers 下 isNode/isSubsCheckPro 均为 false，放开创建分享的接口门禁。',
+                    ].join('\n'),
+                );
+                if (contents.includes(tokenNeedle) || !contents.includes('__SUB_STORE_WORKERS_PATCH__SHARE_SIGN_TOKEN__')) {
+                    this.error('[sub-store-transform] restful/token.js 分享补丁自检失败');
+                }
+                tokenPatchApplied += 1;
             }
 
             if (contents !== code) {
