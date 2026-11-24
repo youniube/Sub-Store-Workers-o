@@ -23,6 +23,10 @@ export function subStoreTransformPlugin() {
     let miscsFileSeen = false;
     let tokenPatchApplied = 0;
     let tokenFileSeen = false;
+    let restfulDownloadPatchApplied = 0;
+    let restfulDownloadFileSeen = false;
+    let restfulFilePatchApplied = 0;
+    let restfulFileFileSeen = false;
     let subStoreFileSeen = false;
 
     const requiredTargetFiles = [
@@ -34,6 +38,8 @@ export function subStoreTransformPlugin() {
         ['utils/rs.js', () => rsFileSeen, () => rsPatchApplied],
         ['restful/miscs.js', () => miscsFileSeen, () => miscsPatchApplied],
         ['restful/token.js', () => tokenFileSeen, () => tokenPatchApplied],
+        ['restful/download.js', () => restfulDownloadFileSeen, () => restfulDownloadPatchApplied],
+        ['restful/file.js', () => restfulFileFileSeen, () => restfulFilePatchApplied],
     ];
 
     const dangerousRequireNames = [
@@ -564,6 +570,51 @@ export default {
                     this.error('[sub-store-transform] restful/token.js 分享补丁自检失败');
                 }
                 tokenPatchApplied += 1;
+            }
+
+            // Workers 部署分享功能（3/3）：分享 Token 校验。
+            // 上游 restful/download.js（单条订阅 + 组合订阅）与 restful/file.js
+            // 只在 Loon 付费版（isSubsCheckPro）才校验分享 Token；Workers 下
+            // isSubsCheckPro 恒为 false，删分享、改 Token、过期、次数用尽都不会
+            // 在下载时生效，旧链接照样能拉到节点。改为无条件校验：/share/ 路由
+            // 必须持有有效的 Token（consumeShareTokenForRequest 校验过期与次数），
+            // 否则返回 404。非分享路由（/download/、/api/ 等）不受影响。
+            if (id.includes('sub-store/backend/src/restful/download.js')) {
+                restfulDownloadFileSeen = true;
+                const shareGateNeedle = 'ENV().isSubsCheckPro &&';
+                if (!contents.includes(shareGateNeedle)) {
+                    this.error('[sub-store-transform] restful/download.js 分享补丁未应用：未命中分享 Token 校验门');
+                }
+                contents = contents.split(shareGateNeedle).join(
+                    [
+                        '// __SUB_STORE_WORKERS_PATCH__SHARE_ENFORCE__',
+                        '        // Workers 下 isSubsCheckPro 恒为 false，分享 Token 校验永不执行；改为无条件校验。',
+                        '        true &&',
+                    ].join('\n'),
+                );
+                if (contents.includes(shareGateNeedle) || !contents.includes('__SUB_STORE_WORKERS_PATCH__SHARE_ENFORCE__')) {
+                    this.error('[sub-store-transform] restful/download.js 分享补丁自检失败');
+                }
+                restfulDownloadPatchApplied += 1;
+            }
+
+            if (id.includes('sub-store/backend/src/restful/file.js')) {
+                restfulFileFileSeen = true;
+                const shareGateNeedle = 'ENV().isSubsCheckPro &&';
+                if (!contents.includes(shareGateNeedle)) {
+                    this.error('[sub-store-transform] restful/file.js 分享补丁未应用：未命中分享 Token 校验门');
+                }
+                contents = contents.split(shareGateNeedle).join(
+                    [
+                        '// __SUB_STORE_WORKERS_PATCH__SHARE_ENFORCE__',
+                        '        // Workers 下 isSubsCheckPro 恒为 false，分享 Token 校验永不执行；改为无条件校验。',
+                        '        true &&',
+                    ].join('\n'),
+                );
+                if (contents.includes(shareGateNeedle) || !contents.includes('__SUB_STORE_WORKERS_PATCH__SHARE_ENFORCE__')) {
+                    this.error('[sub-store-transform] restful/file.js 分享补丁自检失败');
+                }
+                restfulFilePatchApplied += 1;
             }
 
             if (contents !== code) {
